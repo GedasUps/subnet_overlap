@@ -22,7 +22,6 @@ int main(void)
 		closelog();
 		return 1;
 	}
-	netlink_init_lan_status();
 	int sock = netlink_setup_socket();
 	if (sock < 0) {
 		syslog(LOG_ERR, "Failed to setup Netlink socket");

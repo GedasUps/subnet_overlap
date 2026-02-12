@@ -13,25 +13,66 @@
 static uint32_t current_lan_network = 0;
 static uint32_t current_lan_ip	    = 0;
 
+static int netmask_to_prefix(struct sockaddr *mask)
+{
+	if (!mask)
+		return 0;
+	uint32_t m = ((struct sockaddr_in *)mask)->sin_addr.s_addr;
+	int bits   = 0;
+	m	   = ntohl(m);
+	while (m & 0x80000000) {
+		bits++;
+		m <<= 1;
+	}
+	return bits;
+}
+
 static uint32_t prefix_to_mask(int prefix)
 {
 	if (prefix <= 0)
 		return 0;
 	return htonl(~((1U << (32 - prefix)) - 1));
 }
+
+static void handle_subnet_logic(const char *ifname, uint32_t ip, int prefix)
+{
+	uint32_t mask	 = prefix_to_mask(prefix);
+	uint32_t network = ip & mask;
+
+	if (strcmp(ifname, "br-lan") == 0) {
+		current_lan_network = network;
+		current_lan_ip	    = ip;
+		syslog(LOG_NOTICE, "Netlink: LAN subnet monitored: %u.%u.%u.%u/%d", (ip & 0xFF),
+		       (ip >> 8 & 0xFF), (ip >> 16 & 0xFF), (ip >> 24 & 0xFF), prefix);
+	} else if (strcmp(ifname, "eth1") == 0) {
+		// Tikriname konfliktą (current_lan_network jau turi būti užpildytas dėka Bootstrap)
+		int conflict = (current_lan_network != 0 && network == current_lan_network);
+
+		ubus_notify_conflict(conflict, &ip, &current_lan_ip);
+
+		if (conflict) {
+			syslog(LOG_ERR, "Netlink: !!! CONFLICT detected on %s !!! WAN IP matches LAN subnet",
+			       ifname);
+		} else {
+			syslog(LOG_INFO, "Netlink: WAN interface %s checked, no conflict with LAN", ifname);
+		}
+	}
+}
+
 void netlink_init_lan_status(void)
 {
 	struct ifaddrs *ifaddr, *ifa;
+	char ip_str[INET_ADDRSTRLEN];
 
 	if (getifaddrs(&ifaddr) == -1) {
-		syslog(LOG_ERR, "Netlink: getifaddrs nepavyko");
+		syslog(LOG_ERR, "Netlink: getifaddrs failed during bootstrap");
 		return;
 	}
 
 	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
 		if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET)
 			continue;
-		// check maybe it has by at start already also wan
+
 		if (strcmp(ifa->ifa_name, "br-lan") == 0) {
 			struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
 			struct sockaddr_in *mask = (struct sockaddr_in *)ifa->ifa_netmask;
@@ -39,38 +80,27 @@ void netlink_init_lan_status(void)
 			current_lan_ip	    = addr->sin_addr.s_addr;
 			current_lan_network = current_lan_ip & mask->sin_addr.s_addr;
 
-			char ip_str[INET_ADDRSTRLEN];
 			inet_ntop(AF_INET, &current_lan_ip, ip_str, sizeof(ip_str));
-			syslog(LOG_NOTICE, "Netlink Bootstrap: LAN initial state detected: %s", ip_str);
-			break;
+			syslog(LOG_NOTICE, "Netlink Bootstrap: LAN detected: %s", ip_str);
+		}
+	}
+
+	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+		if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET)
+			continue;
+
+		if (strcmp(ifa->ifa_name, "eth1") == 0) {
+			struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+			int prefix		 = netmask_to_prefix(ifa->ifa_netmask);
+
+			inet_ntop(AF_INET, &addr->sin_addr, ip_str, sizeof(ip_str));
+			syslog(LOG_NOTICE, "Netlink Bootstrap: WAN detected: %s", ip_str);
+
+			handle_subnet_logic(ifa->ifa_name, addr->sin_addr.s_addr, prefix);
 		}
 	}
 
 	freeifaddrs(ifaddr);
-}
-
-static void handle_subnet_logic(const char *ifname, uint32_t ip, int prefix)
-{
-	uint32_t mask	 = prefix_to_mask(prefix);
-	uint32_t network = ip & mask;
-	syslog(LOG_INFO, "Netlink handle subnet logic started for interface: %s", ifname);
-	if (strcmp(ifname, "br-lan") == 0) {
-		current_lan_network = network;
-		current_lan_ip	    = ip;
-		syslog(LOG_NOTICE, "Netlink: LAN subnet monitored: %u.%u.%u.%u/%d", (ip & 0xFF),
-		       (ip >> 8 & 0xFF), (ip >> 16 & 0xFF), (ip >> 24 & 0xFF), prefix);
-	} else if (strcmp(ifname, "eth1") == 0) {
-		int conflict = (current_lan_network != 0 && network == current_lan_network);
-		ubus_notify_conflict(conflict, &ip, &current_lan_ip);
-		syslog(LOG_INFO, "Netlink: WAN subnet monitored: %u.%u.%u.%u/%d", (ip & 0xFF),
-		       (ip >> 8 & 0xFF), (ip >> 16 & 0xFF), (ip >> 24 & 0xFF), prefix);
-		syslog(LOG_INFO, "Netlink: LAN network: %u.%u.%u.%u/%d", (current_lan_network & 0xFF),
-		       (current_lan_network >> 8 & 0xFF), (current_lan_network >> 16 & 0xFF),
-		       (current_lan_network >> 24 & 0xFF), prefix);
-		if (conflict) {
-			syslog(LOG_ERR, "Netlink: CONFLICT detected on %s!", ifname);
-		}
-	}
 }
 
 static void parse_address_msg(struct nlmsghdr *nh)
@@ -80,7 +110,7 @@ static void parse_address_msg(struct nlmsghdr *nh)
 	int rta_len	      = IFA_PAYLOAD(nh);
 	char ifname[IF_NAMESIZE];
 	uint32_t ip = 0;
-	syslog(LOG_INFO, "Netlink: parsing address message");
+
 	if (!if_indextoname(ifa->ifa_index, ifname))
 		return;
 
@@ -102,17 +132,23 @@ int netlink_setup_socket(void)
 	if (sock < 0)
 		return -1;
 
-	struct sockaddr_nl sa = { .nl_family = AF_NETLINK, .nl_groups = RTMGRP_IPV4_IFADDR };
+	struct sockaddr_nl sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.nl_family = AF_NETLINK;
+	sa.nl_groups = RTMGRP_IPV4_IFADDR;
+
 	if (bind(sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
 		close(sock);
 		return -1;
 	}
-	syslog(LOG_INFO, "Netlink: socket created and bound");
+	syslog(LOG_INFO, "Netlink: socket initialized and bound to groups");
 	return sock;
 }
 
 void netlink_handle_event(int fd)
 {
+	// fix this
+	netlink_init_lan_status();
 	char buf[8192];
 	int len = recv(fd, buf, sizeof(buf), 0);
 	if (len <= 0)
@@ -122,7 +158,6 @@ void netlink_handle_event(int fd)
 		if (nh->nlmsg_type == NLMSG_DONE)
 			break;
 		if (nh->nlmsg_type == RTM_NEWADDR) {
-			syslog(LOG_INFO, "Netlink: new address event");
 			parse_address_msg(nh);
 		}
 	}

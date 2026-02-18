@@ -60,7 +60,6 @@ static void handle_subnet_logic(const char *ifname, uint32_t ip, int prefix)
 	}
 }
 
-/* Ši funkcija kviečiama TIK VIENĄ KARTĄ programos starto metu */
 void netlink_init_lan_status(void)
 {
 	struct ifaddrs *ifaddr, *ifa;
@@ -71,7 +70,6 @@ void netlink_init_lan_status(void)
 		return;
 	}
 
-	// 1 etapas: Surandame LAN
 	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
 		if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET)
 			continue;
@@ -88,7 +86,6 @@ void netlink_init_lan_status(void)
 		}
 	}
 
-	// 2 etapas: Surandame WAN ir patikriname konfliktą, jei jis jau prijungtas
 	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
 		if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET)
 			continue;

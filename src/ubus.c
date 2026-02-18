@@ -9,7 +9,6 @@
 static struct ubus_context *ctx = NULL;
 static struct blob_buf b;
 
-// Global state to track conflict
 static int current_conflict    = 0;
 static char current_wan_ip[16] = "";
 static char current_lan_ip[16] = "";

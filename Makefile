@@ -12,7 +12,7 @@ define Package/subnet_overlap
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Subnet Overlap Detector
-  DEPENDS:=+libubus +libubox +libblobmsg-json +libnl-tiny +rpcd
+  DEPENDS:=+libubus +libubox +libblobmsg-json +libnl-tiny
 endef
 
 define Build/Prepare

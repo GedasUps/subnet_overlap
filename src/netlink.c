@@ -13,6 +13,7 @@
 static uint32_t current_lan_network = 0;
 static uint32_t current_lan_ip	    = 0;
 
+/* Pagalbinė funkcija: konvertuoja kaukę į prefiksą (255.255.255.0 -> 24) */
 static int netmask_to_prefix(struct sockaddr *mask)
 {
 	if (!mask)
@@ -45,20 +46,21 @@ static void handle_subnet_logic(const char *ifname, uint32_t ip, int prefix)
 		syslog(LOG_NOTICE, "Netlink: LAN subnet monitored: %u.%u.%u.%u/%d", (ip & 0xFF),
 		       (ip >> 8 & 0xFF), (ip >> 16 & 0xFF), (ip >> 24 & 0xFF), prefix);
 	} else if (strcmp(ifname, "eth1") == 0) {
-		// Tikriname konfliktą (current_lan_network jau turi būti užpildytas dėka Bootstrap)
+		// Tikriname konfliktą
 		int conflict = (current_lan_network != 0 && network == current_lan_network);
 
+		// Pranešame UBUS sistemai (tuo pačiu atnaujiname statusą ubus.c viduje)
 		ubus_notify_conflict(conflict, &ip, &current_lan_ip);
 
 		if (conflict) {
-			syslog(LOG_ERR, "Netlink: !!! CONFLICT detected on %s !!! WAN IP matches LAN subnet",
-			       ifname);
+			syslog(LOG_ERR, "Netlink: !!! CONFLICT detected on %s !!! WAN IP matches LAN subnet", ifname);
 		} else {
 			syslog(LOG_INFO, "Netlink: WAN interface %s checked, no conflict with LAN", ifname);
 		}
 	}
 }
 
+/* Ši funkcija kviečiama TIK VIENĄ KARTĄ programos starto metu */
 void netlink_init_lan_status(void)
 {
 	struct ifaddrs *ifaddr, *ifa;
@@ -69,6 +71,7 @@ void netlink_init_lan_status(void)
 		return;
 	}
 
+	// 1 etapas: Surandame LAN
 	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
 		if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET)
 			continue;
@@ -85,13 +88,14 @@ void netlink_init_lan_status(void)
 		}
 	}
 
+	// 2 etapas: Surandame WAN ir patikriname konfliktą, jei jis jau prijungtas
 	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
 		if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET)
 			continue;
 
 		if (strcmp(ifa->ifa_name, "eth1") == 0) {
 			struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
-			int prefix		 = netmask_to_prefix(ifa->ifa_netmask);
+			int prefix = netmask_to_prefix(ifa->ifa_netmask);
 
 			inet_ntop(AF_INET, &addr->sin_addr, ip_str, sizeof(ip_str));
 			syslog(LOG_NOTICE, "Netlink Bootstrap: WAN detected: %s", ip_str);
@@ -141,14 +145,11 @@ int netlink_setup_socket(void)
 		close(sock);
 		return -1;
 	}
-	syslog(LOG_INFO, "Netlink: socket initialized and bound to groups");
 	return sock;
 }
 
 void netlink_handle_event(int fd)
 {
-	// fix this
-	netlink_init_lan_status();
 	char buf[8192];
 	int len = recv(fd, buf, sizeof(buf), 0);
 	if (len <= 0)

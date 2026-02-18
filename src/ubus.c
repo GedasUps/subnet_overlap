@@ -65,12 +65,10 @@ int ubus_init(void)
 
 int ubus_notify_conflict(int detected, uint32_t *wan_ip, uint32_t *lan_ip)
 {
-	// Update global state
 	current_conflict = detected;
 	inet_ntop(AF_INET, wan_ip, current_wan_ip, sizeof(current_wan_ip));
 	inet_ntop(AF_INET, lan_ip, current_lan_ip, sizeof(current_lan_ip));
 
-	// Send notification
 	blob_buf_init(&b, 0);
 	blobmsg_add_u32(&b, "conflict", detected);
 	blobmsg_add_string(&b, "wan_ip", current_wan_ip);

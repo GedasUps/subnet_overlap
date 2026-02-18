@@ -22,6 +22,11 @@ int main(void)
 		closelog();
 		return 1;
 	}
+
+	/* 1. Atliekame pradinį skenavimą (prieš loop) */
+	netlink_init_lan_status();
+
+	/* 2. Paruošiame socketą naujiems įvykiams */
 	int sock = netlink_setup_socket();
 	if (sock < 0) {
 		syslog(LOG_ERR, "Failed to setup Netlink socket");

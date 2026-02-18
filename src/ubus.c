@@ -19,7 +19,6 @@ static int conflict_status(struct ubus_context *c, struct ubus_object *obj, stru
 {
 	blob_buf_init(&b, 0);
 
-	// Return current conflict status
 	blobmsg_add_u32(&b, "conflict", current_conflict);
 	blobmsg_add_string(&b, "wan_ip", current_wan_ip[0] ? current_wan_ip : "N/A");
 	blobmsg_add_string(&b, "lan_ip", current_lan_ip[0] ? current_lan_ip : "N/A");
